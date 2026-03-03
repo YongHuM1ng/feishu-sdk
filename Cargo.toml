@@ -1,0 +1,50 @@
+[package]
+name = "feishu-sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Feishu/Lark SDK for Rust"
+license = "MIT"
+repository = "https://github.com/palpo-im/feishu-sdk"
+keywords = ["feishu", "lark", "sdk", "api"]
+categories = ["api-bindings", "web-programming"]
+
+[dependencies]
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt-multi-thread", "net"] }
+urlencoding = "2"
+aes = "0.8"
+base64 = "0.22"
+cbc = "0.1"
+sha1 = "0.10"
+sha2 = "0.10"
+chrono = "0.4"
+async-trait = "0.1"
+salvo = { version = "0.89", optional = true }
+tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"], optional = true }
+futures-util = { version = "0.3", optional = true }
+bytes = { version = "1", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[features]
+default = []
+server = ["salvo", "dep:bytes"]
+websocket = ["tokio-tungstenite", "futures-util", "dep:bytes"]
+
+[[bench]]
+name = "performance"
+harness = false
+
+[[example]]
+name = "event_server"
+required-features = ["server"]
+
+[[example]]
+name = "card_handler"
+required-features = ["server"]
