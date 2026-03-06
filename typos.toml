@@ -35,3 +35,4 @@ ftyp = "ftyp"  # federation typing
 typ = "typ"    # typing notifications
 # Allow project-specific table naming convention
 datas = "datas"  # used in table names like event_datas, user_datas
+ehr = "ehr"  # used in table names like event_handler_results
