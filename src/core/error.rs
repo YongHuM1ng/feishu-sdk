@@ -71,6 +71,9 @@ pub enum Error {
     #[error("missing app ticket for marketplace app")]
     MissingAppTicket,
 
+    #[error("helpdesk API requires helpdesk credentials")]
+    MissingHelpdeskCredentials,
+
     #[error("missing access token when token cache is disabled")]
     MissingAccessToken,
 
@@ -100,6 +103,12 @@ pub enum Error {
 
     #[error("websocket connection error: {0}")]
     WebSocketError(String),
+
+    #[error("stream client error: code={code}, msg={msg}")]
+    StreamClientError { code: i32, msg: String },
+
+    #[error("stream server error: code={code}, msg={msg}")]
+    StreamServerError { code: i32, msg: String },
 
     #[error("serialization error: {0}")]
     SerializationError(String),

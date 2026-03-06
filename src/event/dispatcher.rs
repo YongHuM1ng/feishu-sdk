@@ -86,13 +86,33 @@ impl EventDispatcher {
         let event: Event = serde_json::from_slice(&decrypted_body)
             .map_err(|e| Error::InvalidEventFormat(e.to_string()))?;
 
-        if event.is_challenge() {
-            self.logger.info("Received challenge request");
-            return self.handle_challenge(&event);
-        }
-
         if !self.config.skip_signature_verification {
             self.verify_signature(&req, &decrypted_body)?;
+        }
+
+        let routed = self.route_event(event).await?;
+        Ok(routed.unwrap_or_else(|| EventResp::ok(b"{\"success\":true}".to_vec())))
+    }
+
+    pub async fn dispatch_payload(&self, payload: &[u8]) -> Result<Option<EventResp>, Error> {
+        self.logger.debug(&format!(
+            "Dispatching stream event payload: body_len={}",
+            payload.len()
+        ));
+
+        let decrypted_body =
+            crate::event::maybe_decrypt_event_body(payload, self.config.encrypt_key.as_deref())
+                .map_err(|e| Error::EventDecryption(e.to_string()))?;
+        let event: Event = serde_json::from_slice(&decrypted_body)
+            .map_err(|e| Error::InvalidEventFormat(e.to_string()))?;
+
+        self.route_event(event).await
+    }
+
+    async fn route_event(&self, event: Event) -> Result<Option<EventResp>, Error> {
+        if event.is_challenge() {
+            self.logger.info("Received challenge request");
+            return self.handle_challenge(&event).map(Some);
         }
 
         let event_type = event
@@ -105,13 +125,13 @@ impl EventDispatcher {
         let handlers = self.handlers.read().await;
         if let Some(handler) = handlers.get(event_type) {
             let result: Option<EventResp> = handler.handle(event).await?;
-            Ok(result.unwrap_or_else(|| EventResp::ok(b"{\"success\":true}".to_vec())))
+            Ok(result)
         } else {
             self.logger.warn(&format!(
                 "No handler registered for event type: {}",
                 event_type
             ));
-            Ok(EventResp::ok(b"{\"success\":true}".to_vec()))
+            Ok(None)
         }
     }
 
@@ -187,6 +207,23 @@ impl EventDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::{EventHandler, EventHandlerResult};
+
+    struct PayloadHandler;
+
+    impl EventHandler for PayloadHandler {
+        fn event_type(&self) -> &str {
+            "im.message.receive_v1"
+        }
+
+        fn handle(
+            &self,
+            _event: Event,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = EventHandlerResult> + Send + '_>>
+        {
+            Box::pin(async { Ok(None) })
+        }
+    }
 
     #[tokio::test]
     async fn test_dispatcher_challenge() {
@@ -203,5 +240,21 @@ mod tests {
 
         let resp = dispatcher.handle_challenge(&event).unwrap();
         assert_eq!(resp.status_code, 200);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_payload_without_http_headers() {
+        let logger = crate::core::noop_logger();
+        let dispatcher = EventDispatcher::new(EventDispatcherConfig::new(), logger);
+        dispatcher.register_handler(Box::new(PayloadHandler)).await;
+
+        let result = dispatcher
+            .dispatch_payload(
+                br#"{"schema":"2.0","header":{"event_type":"im.message.receive_v1"}}"#,
+            )
+            .await
+            .expect("dispatch payload");
+
+        assert!(result.is_none());
     }
 }

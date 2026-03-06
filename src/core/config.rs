@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use base64::Engine;
 use reqwest::header::HeaderMap;
 
 use super::cache::{CacheRef, default_cache};
@@ -21,6 +22,13 @@ pub enum AppType {
 pub struct HelpdeskCredentials {
     pub helpdesk_id: String,
     pub helpdesk_token: String,
+}
+
+impl HelpdeskCredentials {
+    pub fn auth_header_value(&self) -> String {
+        base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", self.helpdesk_id, self.helpdesk_token))
+    }
 }
 
 #[derive(Clone)]

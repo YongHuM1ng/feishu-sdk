@@ -10,7 +10,7 @@ keywords = ["feishu", "lark", "sdk", "api"]
 categories = ["api-bindings", "web-programming"]
 
 [dependencies]
-reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "multipart", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -27,6 +27,7 @@ salvo = { version = "0.89", optional = true }
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"], optional = true }
 futures-util = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
+prost = { version = "0.13", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -35,7 +36,7 @@ criterion = { version = "0.8", features = ["async_tokio"] }
 [features]
 default = []
 server = ["salvo", "dep:bytes"]
-websocket = ["tokio-tungstenite", "futures-util", "dep:bytes"]
+websocket = ["tokio-tungstenite", "futures-util", "dep:bytes", "dep:prost"]
 
 [[bench]]
 name = "performance"
@@ -47,4 +48,8 @@ required-features = ["server"]
 
 [[example]]
 name = "card_handler"
+required-features = ["server"]
+
+[[example]]
+name = "full_app"
 required-features = ["server"]

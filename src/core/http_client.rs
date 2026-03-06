@@ -4,7 +4,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use super::error::Error;
-use super::request::{ApiRequest, ApiResponse, RequestOptions};
+use super::request::{
+    ApiRequest, ApiRequestBody, ApiResponse, MultipartFieldValue, RequestOptions,
+};
 
 #[async_trait]
 pub trait HttpClient: Send + Sync + std::fmt::Debug {
@@ -67,7 +69,32 @@ impl HttpClient for ReqwestHttpClient {
         }
 
         if let Some(ref body) = request.body {
-            req = req.json(body);
+            match body {
+                ApiRequestBody::Json(body) => {
+                    req = req.json(body);
+                }
+                ApiRequestBody::Multipart(form) => {
+                    let mut multipart = reqwest::multipart::Form::new();
+                    for field in &form.fields {
+                        multipart = match &field.value {
+                            MultipartFieldValue::Text(value) => {
+                                multipart.text(field.name.clone(), value.clone())
+                            }
+                            MultipartFieldValue::File(file) => {
+                                let mut part = reqwest::multipart::Part::bytes(file.bytes.clone())
+                                    .file_name(file.file_name.clone());
+                                if let Some(content_type) = &file.content_type {
+                                    part = part.mime_str(content_type).map_err(|err| {
+                                        Error::SerializationError(err.to_string())
+                                    })?;
+                                }
+                                multipart.part(field.name.clone(), part)
+                            }
+                        };
+                    }
+                    req = req.multipart(multipart);
+                }
+            }
         }
 
         let timeout = options.timeout;

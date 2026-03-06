@@ -18,4 +18,7 @@ pub use config::{AppType, Config, ConfigBuilder, FEISHU_BASE_URL, LARK_BASE_URL}
 pub use error::{ApiError, Error};
 pub use http_client::{HttpClient, HttpClientRef, ReqwestHttpClient, default_http_client};
 pub use logger::{DefaultLogger, LogLevel, Logger, LoggerRef, NoopLogger, new_logger, noop_logger};
-pub use request::{AccessTokenType, ApiRequest, ApiResponse, RequestOptions};
+pub use request::{
+    AccessTokenType, ApiRequest, ApiRequestBody, ApiResponse, DownloadedFile, MultipartField,
+    MultipartFieldValue, MultipartFile, MultipartForm, RequestOptions,
+};

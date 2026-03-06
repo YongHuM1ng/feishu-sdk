@@ -1,14 +1,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use serde::Deserialize;
 
 use super::config::Config;
 use super::error::{ApiError, Error};
 use super::http_client::{HttpClientRef, default_http_client};
 use super::logger::LogLevel;
-use super::request::{AccessTokenType, ApiRequest, ApiResponse, RequestOptions};
+use super::request::{
+    AccessTokenType, ApiRequest, ApiRequestBody, ApiResponse, HEADER_OAPI_REQUEST_ID,
+    RequestOptions,
+};
 use super::token::TokenManager;
 
 const USER_AGENT: &str = "oapi-sdk-rust/0.1";
@@ -70,7 +73,7 @@ impl CoreClient {
                 "Request details: query={:?}, path_params={:?}, body={}",
                 req.query,
                 req.path_params,
-                preview_json(req.body.as_ref())
+                preview_body(req.body.as_ref())
             ));
         }
 
@@ -170,12 +173,33 @@ impl CoreClient {
         for (key, value) in &self.config.default_headers {
             merged_options.headers.insert(key.clone(), value.clone());
         }
-        if req.body.is_some() && !merged_options.headers.contains_key(CONTENT_TYPE) {
+        if matches!(req.body, Some(ApiRequestBody::Json(_)))
+            && !merged_options.headers.contains_key(CONTENT_TYPE)
+        {
             merged_options.headers.insert(
                 CONTENT_TYPE,
                 "application/json; charset=utf-8"
                     .parse()
                     .expect("valid content type"),
+            );
+        }
+        if let Some(request_id) = &merged_options.request_id
+            && !merged_options.headers.contains_key(HEADER_OAPI_REQUEST_ID)
+        {
+            merged_options.headers.insert(
+                HeaderName::from_static(HEADER_OAPI_REQUEST_ID),
+                HeaderValue::from_str(request_id)?,
+            );
+        }
+        if merged_options.need_helpdesk_auth {
+            let credentials = self
+                .config
+                .helpdesk_credentials
+                .as_ref()
+                .ok_or(Error::MissingHelpdeskCredentials)?;
+            merged_options.headers.insert(
+                HeaderName::from_static("x-lark-helpdesk-authorization"),
+                HeaderValue::from_str(&credentials.auth_header_value())?,
             );
         }
         if merged_options.timeout.is_none() {
@@ -272,12 +296,15 @@ fn parse_code_error(resp: &ApiResponse) -> Result<Option<CodeError>, Error> {
     Ok(Some(parsed))
 }
 
-fn preview_json(body: Option<&serde_json::Value>) -> String {
+fn preview_body(body: Option<&ApiRequestBody>) -> String {
     match body {
         None => "<empty>".to_string(),
-        Some(value) => {
+        Some(ApiRequestBody::Json(value)) => {
             let text = value.to_string();
             truncate_for_log(&text, 512)
+        }
+        Some(ApiRequestBody::Multipart(form)) => {
+            format!("<multipart fields={}>", form.fields.len())
         }
     }
 }
@@ -302,6 +329,7 @@ mod tests {
     use async_trait::async_trait;
     use reqwest::Method;
     use reqwest::header::HeaderMap;
+    use tokio::sync::Mutex;
 
     use super::*;
     use crate::core::http_client::HttpClient;
@@ -353,6 +381,28 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct CaptureHttpClient {
+        headers: Arc<Mutex<Option<HeaderMap>>>,
+    }
+
+    #[async_trait]
+    impl HttpClient for CaptureHttpClient {
+        async fn execute(
+            &self,
+            _request: ApiRequest,
+            options: &RequestOptions,
+            _token: Option<String>,
+        ) -> Result<ApiResponse, Error> {
+            *self.headers.lock().await = Some(options.headers.clone());
+            Ok(ApiResponse {
+                status: 200,
+                headers: HeaderMap::new(),
+                body: br#"{"code":0,"msg":"ok"}"#.to_vec(),
+            })
+        }
+    }
+
     #[tokio::test]
     async fn core_client_uses_custom_http_client() {
         let custom_http = Arc::new(MockHttpClient {
@@ -393,6 +443,58 @@ mod tests {
             .expect("request should retry");
         assert_eq!(resp.status, 200);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn core_client_injects_request_id_and_helpdesk_auth_headers() {
+        let capture = Arc::new(CaptureHttpClient::default());
+        let config = Config::builder("app", "secret")
+            .helpdesk("hd_123", "token_456")
+            .http_client(capture.clone())
+            .build();
+        let client = CoreClient::new(config).expect("core client");
+
+        let mut req = ApiRequest::new(Method::GET, "/open-apis/mock/v1/ping");
+        req.supported_token_types = vec![AccessTokenType::None];
+
+        client
+            .request(
+                &req,
+                &RequestOptions::new()
+                    .request_id("req_123")
+                    .need_helpdesk_auth(),
+            )
+            .await
+            .expect("request should pass");
+
+        let headers = capture
+            .headers
+            .lock()
+            .await
+            .clone()
+            .expect("captured headers");
+        assert_eq!(
+            headers
+                .get(HEADER_OAPI_REQUEST_ID)
+                .and_then(|value| value.to_str().ok()),
+            Some("req_123")
+        );
+        assert!(headers.contains_key("x-lark-helpdesk-authorization"));
+    }
+
+    #[tokio::test]
+    async fn core_client_requires_helpdesk_credentials_when_requested() {
+        let config = Config::builder("app", "secret").build();
+        let client = CoreClient::new(config).expect("core client");
+
+        let mut req = ApiRequest::new(Method::GET, "/open-apis/mock/v1/ping");
+        req.supported_token_types = vec![AccessTokenType::None];
+
+        let err = client
+            .request(&req, &RequestOptions::new().need_helpdesk_auth())
+            .await
+            .expect_err("helpdesk auth should require credentials");
+        assert!(matches!(err, Error::MissingHelpdeskCredentials));
     }
 
     #[test]

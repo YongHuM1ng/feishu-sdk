@@ -33,7 +33,7 @@ pub use contact_v3_user::{
 };
 pub use drive_v1_file::{
     CreateFolderBody, DownloadFileQuery, DriveV1FileApi, FileInfo, ListFileQuery,
-    MoveFileToTrashBody,
+    MoveFileToTrashBody, UploadFileBody, UploadFileQuery,
 };
 pub use ext::ExtApi;
 pub use generated_models::*;
@@ -48,8 +48,10 @@ pub use im_v1_message::{
 pub use service_wrappers::{
     BitableV1AppApi, BitableV1RecordApi, BitableV1TableApi, CalendarV4CalendarEventApi,
     ContactV3DepartmentApi, ContactV3GroupApi, ContactV3UnitApi, DocxV1BlockApi, DocxV1DocumentApi,
-    DriveV1FolderApi, DriveV1PermissionApi, ImV1FileApi, ImV1ImageApi, ImV1PinApi, ImV1ReactionApi,
-    ImV1ThreadApi, SheetsV3SheetApi, SheetsV3SpreadsheetApi,
+    DriveV1FolderApi, DriveV1PermissionApi, ImFileUploadBody, ImFileUploadResponseData,
+    ImImageUploadBody, ImImageUploadResponseData, ImV1FileApi, ImV1ImageApi,
+    ImV1MessageResourceApi, ImV1PinApi, ImV1ReactionApi, ImV1ThreadApi, SheetsV3SheetApi,
+    SheetsV3SpreadsheetApi,
 };
 
 use crate::Client;
@@ -121,6 +123,10 @@ impl Client {
 
     pub fn im_v1_reaction(&self) -> ImV1ReactionApi<'_> {
         ImV1ReactionApi::new(self)
+    }
+
+    pub fn im_v1_message_resource(&self) -> ImV1MessageResourceApi<'_> {
+        ImV1MessageResourceApi::new(self)
     }
 
     pub fn im_v1_thread(&self) -> ImV1ThreadApi<'_> {

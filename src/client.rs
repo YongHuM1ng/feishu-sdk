@@ -7,8 +7,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::core::{
-    AccessTokenType, ApiRequest, ApiResponse, CacheRef, CoreClient, Error, HttpClientRef, LogLevel,
-    LoggerRef, RequestOptions,
+    AccessTokenType, ApiRequest, ApiRequestBody, ApiResponse, CacheRef, CoreClient, Error,
+    HttpClientRef, LogLevel, LoggerRef, MultipartForm, RequestOptions,
 };
 use crate::generated::{Endpoint, find_endpoint};
 use crate::utils::SerializerRef;
@@ -95,6 +95,15 @@ impl Client {
         ClientBuilder::new(config)
     }
 
+    pub fn config(&self) -> &crate::core::Config {
+        self.core.config()
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn stream(&self) -> crate::ws::StreamClientBuilder {
+        crate::ws::StreamClient::builder(self.core.config().clone())
+    }
+
     pub fn endpoint(&self, operation_id: &str) -> Option<&'static Endpoint> {
         find_endpoint(operation_id)
     }
@@ -116,6 +125,24 @@ impl Client {
         path_params: HashMap<String, String>,
         query: Vec<(String, String)>,
         body: Option<Value>,
+        options: RequestOptions,
+    ) -> Result<ApiResponse, Error> {
+        self.call_with_request_body(
+            operation_id,
+            path_params,
+            query,
+            body.map(ApiRequestBody::Json),
+            options,
+        )
+        .await
+    }
+
+    async fn call_with_request_body(
+        &self,
+        operation_id: &str,
+        path_params: HashMap<String, String>,
+        query: Vec<(String, String)>,
+        body: Option<ApiRequestBody>,
         options: RequestOptions,
     ) -> Result<ApiResponse, Error> {
         let endpoint = find_endpoint(operation_id)
@@ -151,6 +178,24 @@ impl Client {
         body: Option<Value>,
         options: RequestOptions,
     ) -> Result<ApiResponse, Error> {
+        self.request_with_body_kind(
+            method,
+            api_path,
+            query,
+            body.map(ApiRequestBody::Json),
+            options,
+        )
+        .await
+    }
+
+    async fn request_with_body_kind(
+        &self,
+        method: Method,
+        api_path: impl Into<String>,
+        query: Vec<(String, String)>,
+        body: Option<ApiRequestBody>,
+        options: RequestOptions,
+    ) -> Result<ApiResponse, Error> {
         let mut req = ApiRequest::new(method, api_path.into());
         req.query = query;
         req.body = body;
@@ -161,6 +206,35 @@ impl Client {
             AccessTokenType::User,
         ];
         self.core.request(&req, &options).await
+    }
+
+    pub async fn request_multipart(
+        &self,
+        method: Method,
+        api_path: impl Into<String>,
+        query: Vec<(String, String)>,
+        form: MultipartForm,
+        options: RequestOptions,
+    ) -> Result<ApiResponse, Error> {
+        self.request_with_body_kind(
+            method,
+            api_path,
+            query,
+            Some(ApiRequestBody::Multipart(form)),
+            options,
+        )
+        .await
+    }
+
+    pub async fn post_multipart(
+        &self,
+        api_path: impl Into<String>,
+        query: Vec<(String, String)>,
+        form: MultipartForm,
+        options: RequestOptions,
+    ) -> Result<ApiResponse, Error> {
+        self.request_multipart(Method::POST, api_path, query, form, options)
+            .await
     }
 
     pub async fn get(
@@ -226,7 +300,7 @@ pub struct OperationBuilder<'a> {
     operation_id: String,
     path_params: HashMap<String, String>,
     query: Vec<(String, String)>,
-    body: Option<Value>,
+    body: Option<ApiRequestBody>,
     options: RequestOptions,
 }
 
@@ -242,13 +316,18 @@ impl<'a> OperationBuilder<'a> {
     }
 
     pub fn body_value(mut self, body: Value) -> Self {
-        self.body = Some(body);
+        self.body = Some(ApiRequestBody::Json(body));
         self
     }
 
     pub fn body_json<T: Serialize>(mut self, body: &T) -> Result<Self, Error> {
-        self.body = Some(serde_json::to_value(body)?);
+        self.body = Some(ApiRequestBody::Json(serde_json::to_value(body)?));
         Ok(self)
+    }
+
+    pub fn body_multipart(mut self, form: MultipartForm) -> Self {
+        self.body = Some(ApiRequestBody::Multipart(form));
+        self
     }
 
     pub fn options(mut self, options: RequestOptions) -> Self {
@@ -281,6 +360,16 @@ impl<'a> OperationBuilder<'a> {
         self
     }
 
+    pub fn request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.options.request_id = Some(request_id.into());
+        self
+    }
+
+    pub fn need_helpdesk_auth(mut self) -> Self {
+        self.options.need_helpdesk_auth = true;
+        self
+    }
+
     pub fn header(mut self, key: impl AsRef<str>, value: impl AsRef<str>) -> Result<Self, Error> {
         let header_name: HeaderName = key.as_ref().parse()?;
         let header_value = HeaderValue::from_str(value.as_ref())?;
@@ -290,7 +379,7 @@ impl<'a> OperationBuilder<'a> {
 
     pub async fn send(self) -> Result<ApiResponse, Error> {
         self.client
-            .call(
+            .call_with_request_body(
                 &self.operation_id,
                 self.path_params,
                 self.query,
@@ -308,7 +397,7 @@ impl<'a> OperationBuilder<'a> {
         String,
         HashMap<String, String>,
         Vec<(String, String)>,
-        Option<Value>,
+        Option<ApiRequestBody>,
         RequestOptions,
     ) {
         (
@@ -358,5 +447,20 @@ mod tests {
         );
         assert!(body.is_none());
         assert_eq!(options.tenant_key.as_deref(), Some("tenant_1"));
+    }
+
+    #[test]
+    fn operation_builder_supports_multipart_and_request_options() {
+        let client = Client::new(Config::builder("app", "secret").build()).expect("client");
+        let builder = client
+            .operation("im.v1.file.create")
+            .body_multipart(MultipartForm::new().text("file_type", "stream"))
+            .request_id("req_456")
+            .need_helpdesk_auth();
+
+        let (_, _, _, body, options) = builder.into_inner();
+        assert!(matches!(body, Some(ApiRequestBody::Multipart(_))));
+        assert_eq!(options.request_id.as_deref(), Some("req_456"));
+        assert!(options.need_helpdesk_auth);
     }
 }

@@ -114,13 +114,50 @@ impl CardActionHandler {
         })
     }
 
+    pub async fn handle_payload(&self, payload: &[u8]) -> Result<EventResp, Error> {
+        self.logger.debug(&format!(
+            "Card action stream payload: body_len={}",
+            payload.len()
+        ));
+
+        let decrypted_body = self.decrypt_payload_if_needed(payload).await?;
+
+        let card_action: super::models::CardAction = serde_json::from_slice(&decrypted_body)
+            .map_err(|e| Error::InvalidCardActionFormat(e.to_string()))?;
+
+        if card_action.is_challenge() {
+            self.logger.info("Received card challenge request");
+            return self.handle_challenge(&card_action);
+        }
+
+        let handler = self
+            .handler
+            .as_ref()
+            .ok_or_else(|| Error::InvalidCardActionFormat("no handler registered".to_string()))?;
+
+        let result = handler(card_action).await?;
+
+        Ok(match result {
+            Some(response) => {
+                let body = serde_json::to_vec(&response)
+                    .map_err(|e| Error::SerializationError(e.to_string()))?;
+                EventResp::ok(body)
+            }
+            None => EventResp::ok(serde_json::to_vec(&CardResponse::success()).unwrap()),
+        })
+    }
+
     async fn decrypt_body_if_needed(&self, req: &EventReq) -> Result<Vec<u8>, Error> {
-        let body_str = String::from_utf8_lossy(&req.body);
+        self.decrypt_payload_if_needed(&req.body).await
+    }
+
+    async fn decrypt_payload_if_needed(&self, payload: &[u8]) -> Result<Vec<u8>, Error> {
+        let body_str = String::from_utf8_lossy(payload);
 
         if body_str.contains("\"encrypt\"") {
             if let Some(ref key) = self.event_encrypt_key {
                 self.logger.debug("Decrypting card action body");
-                crate::event::maybe_decrypt_event_body(&req.body, Some(key))
+                crate::event::maybe_decrypt_event_body(payload, Some(key))
                     .map_err(|e| Error::EventDecryption(e.to_string()))
             } else {
                 Err(Error::EventDecryption(
@@ -128,7 +165,7 @@ impl CardActionHandler {
                 ))
             }
         } else {
-            Ok(req.body.clone())
+            Ok(payload.to_vec())
         }
     }
 
@@ -200,5 +237,25 @@ mod tests {
 
         let resp = handler.handle_challenge(&card_action).unwrap();
         assert_eq!(resp.status_code, 200);
+    }
+
+    #[tokio::test]
+    async fn test_card_handler_payload_entrypoint() {
+        let handler = CardActionHandler::new(noop_logger()).handler(|_action| async {
+            Ok(Some(
+                crate::card::models::CardResponse::new()
+                    .toast(crate::card::models::CardToast::success("ok")),
+            ))
+        });
+
+        let resp = handler
+            .handle_payload(
+                br#"{"open_id":"ou_1","token":"verify_token","action":{"tag":"button"}}"#,
+            )
+            .await
+            .expect("handle payload");
+
+        assert_eq!(resp.status_code, 200);
+        assert!(String::from_utf8_lossy(&resp.body).contains("\"toast\""));
     }
 }
