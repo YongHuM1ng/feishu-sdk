@@ -58,7 +58,7 @@ pub struct EventHeader {
 pub struct Event<T = serde_json::Value> {
     pub schema: Option<String>,
     pub header: Option<EventHeader>,
-    #[serde(flatten)]
+    #[serde(default)]
     pub event: Option<T>,
     pub event_type: Option<String>,
     pub token: Option<String>,
@@ -208,5 +208,33 @@ mod tests {
         assert_eq!(resp.status_code, 200);
         let body_str = String::from_utf8_lossy(&resp.body);
         assert!(body_str.contains("test_challenge"));
+    }
+
+    #[test]
+    fn test_event_preserves_nested_event_payload() {
+        let json = r#"{
+            "schema": "2.0",
+            "header": {
+                "event_type": "im.message.receive_v1"
+            },
+            "event": {
+                "message": {
+                    "message_id": "om_xxx",
+                    "chat_id": "oc_xxx",
+                    "message_type": "text",
+                    "content": "{\"text\":\"hello\"}"
+                }
+            }
+        }"#;
+
+        let event: Event = serde_json::from_str(json).unwrap();
+        let payload = event.event.expect("event payload");
+        assert_eq!(
+            payload
+                .get("message")
+                .and_then(|message| message.get("message_id"))
+                .and_then(|value| value.as_str()),
+            Some("om_xxx")
+        );
     }
 }
