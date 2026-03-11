@@ -13,7 +13,7 @@ Rust SDK for Feishu/Lark Open Platform API. Provides a complete, type-safe inter
 - **Complete API Coverage**: 1448+ operations from Feishu Open Platform
 - **Token Management**: Automatic app_access_token and tenant_access_token handling
 - **Event Processing**: Event subscription and card callback handling
-- **WebSocket Support**: Long connection for real-time messaging
+- **WebSocket Support**: Long connection for real-time messaging **(❌ Unimplemented)**
 - **HTTP Server**: Built-in Salvo server for webhook handling
 - **Type Safety**: Generated operation constants and typed APIs
 - **Async/Await**: Full async support with tokio runtime
@@ -123,7 +123,7 @@ async fn main() {
 }
 ```
 
-### WebSocket Client
+### WebSocket Client (❌ Unimplemented)
 
 ```rust
 use feishu_sdk::core::noop_logger;
@@ -237,7 +237,7 @@ See the `examples/` directory:
 - `approval_v4.rs` - Approval operations
 - `event_server.rs` - Event handling server
 - `card_handler.rs` - Card callback server
-- `websocket_client.rs` - WebSocket client
+- `websocket_client.rs` - WebSocket client **(❌ Unimplemented)**
 - `full_app.rs` - End-to-end app example (client + event + card)
 
 Run examples:
